@@ -6,6 +6,7 @@
     ../../modules/networking.nix
     ../../modules/ssh.nix
     ../../modules/development.nix
+    ../../modules/ddns-go.nix
   ] ++ lib.optional (builtins.pathExists ./hardware-configuration.nix)
     ./hardware-configuration.nix;
 

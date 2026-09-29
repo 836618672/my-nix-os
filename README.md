@@ -1,6 +1,6 @@
 # Mini PC NixOS 配置
 
-用于单块 NVMe SSD、UEFI 启动的 x86_64 Mini PC。当前只包含稳定版 NixOS 26.05、Disko、NetworkManager、SSH、zram 和通用 CLI。项目语言环境以后用各项目的 `nix develop` 管理。
+用于单块 NVMe SSD、UEFI 启动的 x86_64 Mini PC。当前包含稳定版 NixOS 26.05、Disko、NetworkManager、SSH、zram、DDNS-Go 和通用 CLI。项目语言环境以后用各项目的 `nix develop` 管理。
 
 ## 安装前必须完成
 
@@ -135,14 +135,13 @@ ssh yulinye@<NEW_IP>
 
 ```bash
 cd ~/nixos-config
-sudo nixos-generate-config --no-filesystems --root /
-sudo cp /etc/nixos/hardware-configuration.nix hosts/minipc/hardware-configuration.nix
-sudo chown "$USER" hosts/minipc/hardware-configuration.nix
+sudo nixos-generate-config --no-filesystems --show-hardware-config > hosts/minipc/hardware-configuration.nix
+test -s hosts/minipc/hardware-configuration.nix
 git add hosts/minipc/hardware-configuration.nix
 nix flake check
 ```
 
-检查生成文件中没有重复定义 Disko 管理的 `/`、`/boot` 等 `fileSystems` 或 `swapDevices`；`--no-filesystems` 正是为此使用。确认模块、驱动和固件配置后提交它。也可把生成的文件传回 Mac 仓库，审阅并提交后再部署。未来修改配置：
+`--show-hardware-config` 直接将检测结果输出到当前仓库；不要在已运行的系统上使用 `--root /`，生成器会报错且不会写文件。检查生成文件中没有重复定义 Disko 管理的 `/`、`/boot` 等 `fileSystems` 或 `swapDevices`；`--no-filesystems` 正是为此使用。确认模块、驱动和固件配置后提交它。也可把生成的文件传回 Mac 仓库，审阅并提交后再部署。未来修改配置：
 
 ```bash
 cd ~/nixos-config
@@ -151,6 +150,30 @@ sudo nixos-rebuild switch --flake .#minipc
 ```
 
 `sudo` 执行 flake 构建时需确保工作副本中的变更已经 `git add`，且 `flake.lock` 已存在。新的配置会生成新的 systemd-boot 启动项。若一次 `switch` 出问题，可在本地控制台运行 `sudo nixos-rebuild --rollback switch` 回到上一代；若无法正常启动，在 systemd-boot 菜单选择之前的 NixOS generation，再修复配置。
+
+## 7. 配置 DDNS-Go
+
+`modules/ddns-go.nix` 通过 systemd 启动 nixpkgs 中的 `ddns-go`，开机自动运行。Web 管理页面仅监听 Mini PC 的 `127.0.0.1:9876`，无需开放防火墙端口。DNS 平台令牌、域名和 DDNS-Go 的登录信息通过页面配置，保存在 Mini PC 的 `/var/lib/ddns-go/config.yaml`；不要将该文件或令牌加入 Git。
+
+本次提交推送到远端后，在 **Mini PC** 的仓库中运行：
+
+```bash
+cd ~/nixos-config
+git pull --ff-only
+nix flake check
+sudo nixos-rebuild switch --flake .#minipc
+systemctl status ddns-go --no-pager
+```
+
+`hardware-configuration.nix` 已在仓库中。若 Mini PC 的工作副本还有未提交改动，先审阅并处理，再执行 `git pull --ff-only`。
+
+在 **Mac** 的另一个终端建立 SSH 隧道（保持终端运行）：
+
+```bash
+ssh -N -L 9876:127.0.0.1:9876 yulinye@<MINIPC_IP>
+```
+
+然后在 Mac 浏览器打开 `http://127.0.0.1:9876`，设置 DDNS-Go 登录账号、DNS 平台和要更新的域名。若修改过 `username`，同步修改 SSH 用户名；若 Mac 的 9876 端口被占用，可将命令中第一个 `9876` 改为其他空闲端口，并在浏览器打开对应端口。服务日志用 `journalctl -u ddns-go -e --no-pager` 查看。选择公网 IP 获取方式时，留意家庭网络是否处于运营商 NAT 下：DDNS 只能更新 DNS 记录，不能替代公网地址或端口转发。
 
 ## 配置边界与资料
 
@@ -162,3 +185,4 @@ sudo nixos-rebuild switch --flake .#minipc
 - [nixos-anywhere：从 NixOS 安装介质安装](https://nix-community.github.io/nixos-anywhere/howtos/no-os.html)
 - [中科大 Nix 二进制缓存镜像说明](https://mirrors.ustc.edu.cn/help/nix-channels.html)
 - [nixos-anywhere CLI 选项](https://github.com/nix-community/nixos-anywhere/blob/main/docs/cli.md)
+- [DDNS-Go 官方说明](https://github.com/jeessy2/ddns-go/blob/master/README.md)
