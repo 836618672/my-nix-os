@@ -51,15 +51,17 @@ in
     group = "mihomo";
   };
   users.users.${username}.extraGroups = [ "mihomo" ];
-  networking.firewall.trustedInterfaces = [ "Meta" ];
-
+  networking.firewall = {
+    trustedInterfaces = [ "Meta" ];
+    checkReversePath = "loose";
+  };
 
   services.mihomo = {
     enable = true;
     # A runtime string, not a Nix path that would copy secrets into the store.
     configFile = "${coreDir}/config.yaml";
     webui = pkgs.metacubexd;
-    tunMode = truek;
+    tunMode = true;
   };
 
   # Keep the upstream NixOS service hardening, but share mutable config with
