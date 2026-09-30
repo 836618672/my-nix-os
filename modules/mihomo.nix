@@ -18,7 +18,7 @@ let
     profile:
       store-selected: true
     tun:
-      enable: false
+      enable: true
     dns:
       enable: false
   '';
@@ -51,13 +51,15 @@ in
     group = "mihomo";
   };
   users.users.${username}.extraGroups = [ "mihomo" ];
+  networking.firewall.trustedInterfaces = [ "Meta" ];
+
 
   services.mihomo = {
     enable = true;
     # A runtime string, not a Nix path that would copy secrets into the store.
     configFile = "${coreDir}/config.yaml";
     webui = pkgs.metacubexd;
-    tunMode = false;
+    tunMode = truek;
   };
 
   # Keep the upstream NixOS service hardening, but share mutable config with
