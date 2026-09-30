@@ -175,6 +175,31 @@ ssh -N -L 9876:127.0.0.1:9876 yulinye@<MINIPC_IP>
 
 然后在 Mac 浏览器打开 `http://127.0.0.1:9876`，设置 DDNS-Go 登录账号、DNS 平台和要更新的域名。若修改过 `username`，同步修改 SSH 用户名；若 Mac 的 9876 端口被占用，可将命令中第一个 `9876` 改为其他空闲端口，并在浏览器打开对应端口。服务日志用 `journalctl -u ddns-go -e --no-pager` 查看。选择公网 IP 获取方式时，留意家庭网络是否处于运营商 NAT 下：DDNS 只能更新 DNS 记录，不能替代公网地址或端口转发。
 
+## 8. 安装和更新 Codex CLI
+
+`pkgs/codex.nix` 将 OpenAI 官方的 x86_64 Linux 发布文件作为 Nix 包安装，无需全局 Node/npm。版本和 SHA-256 固定在该文件中；当前为 `0.159.2`，不会在上游发布新版本时自动改变。Nix 会校验下载内容，并通过系统 generations 管理升级和回滚。Codex 登录凭据保存在用户主目录，不写入 Git。
+
+先在 Mac 提交并推送 `pkgs/codex.nix` 和 `modules/development.nix` 的改动。Mini PC 恢复联网后，在它的仓库运行：
+
+```bash
+cd ~/nixos-config
+git pull --ff-only
+sudo nixos-rebuild switch --flake .#minipc
+codex --version
+codex login --device-auth
+```
+
+SSH 服务器上使用 `--device-auth`，按终端提示在 Mac 浏览器完成登录。不要用 `sudo codex`：普通用户的登录状态和项目文件都属于该用户。
+
+升级 Codex 时，先查看 [OpenAI 最新发布](https://github.com/openai/codex/releases/latest)，在 `pkgs/codex.nix` 中更新 `version` 和官方 x86_64 Linux 压缩包的 `hash`，再提交、推送并执行上述 `git pull` 与 `nixos-rebuild`。可用 GitHub 发布接口查询压缩包的 SHA-256：
+
+```bash
+curl -fsSL https://api.github.com/repos/openai/codex/releases/latest \
+  | jq -r '.tag_name, (.assets[] | select(.name == "codex-x86_64-unknown-linux-musl.tar.gz") | .digest)'
+```
+
+将输出的 `sha256:<十六进制值>` 中的十六进制部分转换为 Nix 使用的 SRI 格式：`nix hash convert --hash-algo sha256 --to sri <十六进制值>`。升级前确认上游压缩包名称和内部文件名仍与 `pkgs/codex.nix` 匹配。
+
 ## 配置边界与资料
 
 第一阶段未启用 Docker、Dokploy 或 Tailscale，也没有安装项目级编译器和语言运行时。`/persist` 只是普通 Btrfs 子卷，不启用 impermanence。
@@ -186,3 +211,4 @@ ssh -N -L 9876:127.0.0.1:9876 yulinye@<MINIPC_IP>
 - [中科大 Nix 二进制缓存镜像说明](https://mirrors.ustc.edu.cn/help/nix-channels.html)
 - [nixos-anywhere CLI 选项](https://github.com/nix-community/nixos-anywhere/blob/main/docs/cli.md)
 - [DDNS-Go 官方说明](https://github.com/jeessy2/ddns-go/blob/master/README.md)
+- [Codex CLI 官方说明](https://github.com/openai/codex/blob/main/README.md)

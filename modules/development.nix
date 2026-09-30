@@ -6,5 +6,5 @@
     ripgrep fd fzf jq
     btop htop
     pciutils usbutils
-  ];
+  ] ++ [ (pkgs.callPackage ../pkgs/codex.nix { }) ];
 }
