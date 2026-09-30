@@ -7,6 +7,7 @@
     ../../modules/ssh.nix
     ../../modules/development.nix
     ../../modules/ddns-go.nix
+    ../../modules/mihomo.nix
   ] ++ lib.optional (builtins.pathExists ./hardware-configuration.nix)
     ./hardware-configuration.nix;
 

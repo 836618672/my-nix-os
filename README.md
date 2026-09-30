@@ -1,6 +1,6 @@
 # Mini PC NixOS 配置
 
-用于单块 NVMe SSD、UEFI 启动的 x86_64 Mini PC。当前包含稳定版 NixOS 26.05、Disko、NetworkManager、SSH、zram、DDNS-Go 和通用 CLI。项目语言环境以后用各项目的 `nix develop` 管理。
+用于单块 NVMe SSD、UEFI 启动的 x86_64 Mini PC。当前包含稳定版 NixOS 26.05、Disko、NetworkManager、SSH、zram、DDNS-Go、Mihomo/ClashTUI 和通用 CLI。项目语言环境以后用各项目的 `nix develop` 管理。
 
 ## 安装前必须完成
 
@@ -200,6 +200,84 @@ curl -fsSL https://api.github.com/repos/openai/codex/releases/latest \
 
 将输出的 `sha256:<十六进制值>` 中的十六进制部分转换为 Nix 使用的 SRI 格式：`nix hash convert --hash-algo sha256 --to sri <十六进制值>`。升级前确认上游压缩包名称和内部文件名仍与 `pkgs/codex.nix` 匹配。
 
+## 9. Mihomo 与 ClashTUI：订阅节点和规则自动更新
+
+使用 Nixpkgs 已收录的 `mihomo`、`clashtui` 和 `metacubexd`，由 `modules/mihomo.nix` 配置。订阅下载、配置合并、当前订阅重载使用 **ClashTUI 的现成命令**；NixOS 的 systemd timer 每 6 小时调用一次。无需安装其他发行版的安装脚本、Docker 或桌面环境。
+
+当前锁定的 ClashTUI 是 **0.2.3**，以下操作按该版本的[官方说明](https://github.com/JohanChane/clashtui/blob/v0.2.3/README_ZH.md)和源码核对。新版本文档里的 `profile update --all` 不适用于此版本；这里使用 `clashtui -u`。
+
+### 启用与导入完整 YAML 订阅
+
+代码同步到 Mini PC 后，在 Mini PC 的仓库运行：
+
+```bash
+git pull --ff-only
+nix flake check
+sudo nixos-rebuild switch --flake .#minipc
+```
+
+重新建立 SSH 登录，使新增的 `mihomo` 组权限生效，然后运行：
+
+```bash
+clashtui
+```
+
+在 **Profile** 页按 `i`，填写订阅名称和订阅商的完整 Clash/Mihomo YAML URL；按 `a` 下载订阅及其依赖资源，再按 `Enter` 选择它。按 `?` 查看当前页快捷键，完成后退出。初始配置只有 `MATCH,DIRECT`，导入并选中订阅后才会使用代理节点。
+
+订阅 URL 只在 Mini PC 的界面中输入，保存到 `~/.config/clashtui/`；下载缓存也在该目录。最终运行配置在 `/var/lib/mihomo/config.yaml`。**这些目录可能包含订阅令牌和节点密码，不要放进仓库，也不要贴出其完整内容或完整日志。** 配置目录只对当前用户开放，核心配置目录只对 `mihomo` 用户及组开放。
+
+ClashTUI 0.2.3 会从完整 YAML 同步 `proxies`、`proxy-groups`、`proxy-providers`、`rules`、`rule-providers`、`sub-rules`。端口、DNS、TUN 等基础字段由本地的 `~/.config/clashtui/basic_clash_config.yaml` 保留，**不会逐字段照搬订阅商整个 YAML**。当前本地配置禁用 TUN 和 DNS 服务，使用系统 DNS，仅开放本机 mixed 代理 `127.0.0.1:7890` 与控制 API `127.0.0.1:9090`。
+
+如果订阅依赖其特定的 DNS、嗅探或其他基础字段，需要审阅后补入本地 `basic_clash_config.yaml`，重新打开 ClashTUI 并选择该 Profile。若含有 `PROCESS-NAME` 等进程规则，当前未授权额外的进程读取能力，需要另行调整。订阅包含外部 `rule-providers` 时，其规则集内容更新按订阅 YAML 中的 `interval` 由 Mihomo 执行；定时更新订阅会更新内联规则及规则集定义。首次导入时按 `a` 会同时下载规则资源。
+
+### 自动更新与检查
+
+每 6 小时运行一次 `clashtui -c ~/.config/clashtui -u`，开机时补执行错过的任务。该命令更新订阅并重载当前选中的 Profile；无需每次重新构建 NixOS。检查计划和手动更新：
+
+```bash
+systemctl list-timers mihomo-subscription-update.timer
+clashtui -u
+journalctl -u mihomo-subscription-update -n 50 --no-pager
+systemctl status mihomo --no-pager
+```
+
+ClashTUI 0.2.3 的更新命令即使部分订阅失败，也可能返回退出码 0；应同时检查输出是否有 `Err` / `Not updated`，不能只凭定时任务显示成功判断。此版本不保证配置更新的原子替换或自动备份；首次成功导入后，建议在 Mini PC 上为 `/var/lib/mihomo/config.yaml` 和 `~/.config/clashtui/` 留一份受权限保护的本地备份。不要在手动操作 ClashTUI 时同时启动更新任务。
+
+默认文件只在不存在时复制；`nixos-rebuild` 保留已导入的订阅和本地设置。以后修改模块中的默认模板不会覆盖现有文件；修改用户的本地基础配置后重新选择订阅即可生效。升级核心和 ClashTUI 则通过更新 Flake 的 Nixpkgs 锁定版本并重新构建系统。
+
+### 管理节点与让下载走代理
+
+在 Mac 建立隧道：
+
+```bash
+ssh -N -L 9090:127.0.0.1:9090 yulinye@yback.v6.rocks
+```
+
+浏览器打开 `http://127.0.0.1:9090/ui/`，在 MetaCubeXD 中连接 `http://127.0.0.1:9090`，即可选择节点和查看规则。当前控制 API 密钥为空，因其只监听本机；Mini PC 上的其他本地进程也可访问。若以后改成对外监听，先设置密钥和访问控制。
+
+在 Mini PC 测试代理并让当前终端的 Git/curl 等工具使用它：
+
+```bash
+curl -I --proxy http://127.0.0.1:7890 --connect-timeout 15 https://github.com
+export http_proxy=http://127.0.0.1:7890
+export https_proxy=http://127.0.0.1:7890
+export no_proxy=localhost,127.0.0.1,::1
+```
+
+这不改变 Wi-Fi、默认路由或 SSH。Git 的 HTTPS 地址可使用这些代理变量；`git@github.com:...` 的 SSH 地址不会自动使用 HTTP 代理。
+
+**Nix 下载由系统 `nix-daemon` 执行，不能只依靠终端里的 `export`。** 完成订阅导入、确认代理可用后，可在 `modules/mihomo.nix` 的模块属性集中添加以下声明，再执行 `sudo nixos-rebuild switch --flake .#minipc`：
+
+```nix
+systemd.services.nix-daemon.environment = {
+  http_proxy = "http://127.0.0.1:7890";
+  https_proxy = "http://127.0.0.1:7890";
+  no_proxy = "localhost,127.0.0.1,::1";
+};
+```
+
+该设置也用于 Nix 固定输出下载（例如 Codex 发布文件）。首次安装代理工具本身仍需要直连或已经可用的代理；若现有重建仍卡在 Codex 下载，可以先把 `modules/development.nix` 中追加 Codex 包的部分暂时去掉，应用代理配置，再恢复 Codex 包并重建。不要重跑 Disko 或 nixos-anywhere。代理不可用时先移除上述 daemon 环境配置并重建；普通终端可用 `unset http_proxy https_proxy no_proxy` 恢复。
+
 ## 配置边界与资料
 
 第一阶段未启用 Docker、Dokploy 或 Tailscale，也没有安装项目级编译器和语言运行时。`/persist` 只是普通 Btrfs 子卷，不启用 impermanence。
@@ -212,3 +290,5 @@ curl -fsSL https://api.github.com/repos/openai/codex/releases/latest \
 - [nixos-anywhere CLI 选项](https://github.com/nix-community/nixos-anywhere/blob/main/docs/cli.md)
 - [DDNS-Go 官方说明](https://github.com/jeessy2/ddns-go/blob/master/README.md)
 - [Codex CLI 官方说明](https://github.com/openai/codex/blob/main/README.md)
+- [ClashTUI 0.2.3 官方说明](https://github.com/JohanChane/clashtui/blob/v0.2.3/README_ZH.md)
+- [Mihomo 配置说明](https://wiki.metacubex.one/config/)
