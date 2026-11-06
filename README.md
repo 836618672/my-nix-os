@@ -12,7 +12,7 @@
 3. 确认 Mini PC 是 UEFI 启动且目标 SSD 可以完整清除。`/boot` 是 1 GiB FAT32 ESP；其余是 Btrfs 的 `@root`、`@nix`、`@home`、`@persist`。没有磁盘 swap；启用 zram。
 4. 在 Mac 上准备可运行的 Nix，且 `nix flake` 可用。本仓库不安装或修改 Mac 的 Nix。先用 `git add` 跟踪新文件，再执行 `nix flake lock` 生成并提交 `flake.lock`，最后执行 `nix flake check`。如果首次运行提示实验特性未启用，可对单条命令加 `--extra-experimental-features 'nix-command flakes'`。
 
-`hosts/minipc/hardware-configuration.nix` 在首次安装前**不存在**。`hosts/minipc/default.nix` 仅在该文件存在时导入它；首装使用通用 NVMe/USB/SATA initrd 模块及 Disko 生成的文件系统配置。安装后再生成真实硬件配置，过程见下文。`system.stateVersion = "26.05"` 是首装状态版本，以后升级 NixOS 时不要随手改动。
+`hosts/minipc/hardware-configuration.nix` 已包含当前 Mini PC 的硬件配置。`hosts/minipc/default.nix` 仅在该文件存在时导入它；若安装到另一台机器，应先移除旧硬件配置，首装使用通用 NVMe/USB/SATA initrd 模块及 Disko 生成的文件系统配置。安装后重新生成对应机器的硬件配置，过程见下文。`system.stateVersion = "26.05"` 是首装状态版本，以后升级 NixOS 时不要随手改动。
 
 ## 1. 在 Mini PC 的 NixOS Minimal ISO 中准备网络和 SSH
 
@@ -177,13 +177,12 @@ ssh -N -L 9876:127.0.0.1:9876 yulinye@<MINIPC_IP>
 
 ## 8. 安装和更新 Codex CLI
 
-`pkgs/codex.nix` 将 OpenAI 官方的 x86_64 Linux 发布文件作为 Nix 包安装，无需全局 Node/npm。版本和 SHA-256 固定在该文件中；当前为 `0.159.2`，不会在上游发布新版本时自动改变。Nix 会校验下载内容，并通过系统 generations 管理升级和回滚。Codex 登录凭据保存在用户主目录，不写入 Git。
+Codex CLI 由社区维护的 [codex-cli-nix](https://github.com/sadjow/codex-cli-nix) flake 提供，无需全局 Node/npm。`flake.lock` 固定输入版本，Nix 通过系统 generations 管理升级和回滚。Codex 登录凭据保存在用户主目录，不写入 Git。
 
-先在 Mac 提交并推送 `pkgs/codex.nix` 和 `modules/development.nix` 的改动。Mini PC 恢复联网后，在它的仓库运行：
+安装或应用已有配置：
 
 ```bash
 cd ~/nixos-config
-git pull --ff-only
 sudo nixos-rebuild switch --flake .#minipc
 codex --version
 codex login --device-auth
@@ -191,14 +190,25 @@ codex login --device-auth
 
 SSH 服务器上使用 `--device-auth`，按终端提示在 Mac 浏览器完成登录。不要用 `sudo codex`：普通用户的登录状态和项目文件都属于该用户。
 
-升级 Codex 时，先查看 [OpenAI 最新发布](https://github.com/openai/codex/releases/latest)，在 `pkgs/codex.nix` 中更新 `version` 和官方 x86_64 Linux 压缩包的 `hash`，再提交、推送并执行上述 `git pull` 与 `nixos-rebuild`。可用 GitHub 发布接口查询压缩包的 SHA-256：
+更新 Codex 时，更新该 flake 的锁定版本并重建：
 
 ```bash
-curl -fsSL https://api.github.com/repos/openai/codex/releases/latest \
-  | jq -r '.tag_name, (.assets[] | select(.name == "codex-x86_64-unknown-linux-musl.tar.gz") | .digest)'
+cd ~/nixos-config
+nix flake update codex-cli-nix
+sudo nixos-rebuild switch --flake .#minipc
+codex --version
 ```
 
-将输出的 `sha256:<十六进制值>` 中的十六进制部分转换为 Nix 使用的 SRI 格式：`nix hash convert --hash-algo sha256 --to sri <十六进制值>`。升级前确认上游压缩包名称和内部文件名仍与 `pkgs/codex.nix` 匹配。
+更新后可将 `flake.lock` 的变化提交到 Git，以便在其他机器上复现。
+
+OpenCode 2 CLI 由社区维护的 [llm-agents.nix](https://github.com/numtide/llm-agents.nix) 提供。运行 `opencode`（或 `opencode2`）启动；使用以下命令更新：
+
+```bash
+cd ~/nixos-config
+nix flake update llm-agents
+sudo nixos-rebuild switch --flake .#minipc
+opencode --version
+```
 
 ## 9. Mihomo 与 ClashTUI：订阅节点和规则自动更新
 
@@ -226,7 +236,9 @@ clashtui
 
 订阅 URL 只在 Mini PC 的界面中输入，保存到 `~/.config/clashtui/`；下载缓存也在该目录。最终运行配置在 `/var/lib/mihomo/config.yaml`。**这些目录可能包含订阅令牌和节点密码，不要放进仓库，也不要贴出其完整内容或完整日志。** 配置目录只对当前用户开放，核心配置目录只对 `mihomo` 用户及组开放。
 
-ClashTUI 0.2.3 会从完整 YAML 同步 `proxies`、`proxy-groups`、`proxy-providers`、`rules`、`rule-providers`、`sub-rules`。端口、DNS、TUN 等基础字段由本地的 `~/.config/clashtui/basic_clash_config.yaml` 保留，**不会逐字段照搬订阅商整个 YAML**。当前本地配置禁用 TUN 和 DNS 服务，使用系统 DNS，仅开放本机 mixed 代理 `127.0.0.1:7890` 与控制 API `127.0.0.1:9090`。
+ClashTUI 0.2.3 会从完整 YAML 同步 `proxies`、`proxy-groups`、`proxy-providers`、`rules`、`rule-providers`、`sub-rules`。端口、DNS、TUN 等基础字段由本地的 `~/.config/clashtui/basic_clash_config.yaml` 保留，**不会逐字段照搬订阅商整个 YAML**。当前默认模板启用 TUN，NixOS 服务通过 `tunMode = true` 授予网络管理能力；DNS 服务仍禁用，使用系统 DNS。mixed 代理监听 `127.0.0.1:7890`，控制 API 监听 `127.0.0.1:9090`。
+
+模板设置 `device: Meta`、`auto-route: true` 和 `auto-detect-interface: true`，自动将流量路由到 TUN，并自动选择网络出口；进入 Mihomo 后仍按规则决定直连或使用代理节点。模板未启用 `auto-redirect` 或 DNS 劫持，选项说明见 [Mihomo TUN 文档](https://wiki.metacubex.one/config/inbound/tun/)。防火墙信任名为 `Meta` 的接口，并使用宽松反向路径检查；若在本地配置中指定其他 TUN 设备名，应同步调整 `trustedInterfaces`。现有文件不会随重建被模板覆盖，应以本地配置和实际路由为准；已有安装需要在 `~/.config/clashtui/basic_clash_config.yaml` 中设置上述字段，再在 ClashTUI 中重新选择当前 Profile。
 
 如果订阅依赖其特定的 DNS、嗅探或其他基础字段，需要审阅后补入本地 `basic_clash_config.yaml`，重新打开 ClashTUI 并选择该 Profile。若含有 `PROCESS-NAME` 等进程规则，当前未授权额外的进程读取能力，需要另行调整。订阅包含外部 `rule-providers` 时，其规则集内容更新按订阅 YAML 中的 `interval` 由 Mihomo 执行；定时更新订阅会更新内联规则及规则集定义。首次导入时按 `a` 会同时下载规则资源。
 
@@ -264,7 +276,7 @@ export https_proxy=http://127.0.0.1:7890
 export no_proxy=localhost,127.0.0.1,::1
 ```
 
-这不改变 Wi-Fi、默认路由或 SSH。Git 的 HTTPS 地址可使用这些代理变量；`git@github.com:...` 的 SSH 地址不会自动使用 HTTP 代理。
+上述环境变量作用于支持 HTTP 代理的进程；系统路由是否变化取决于实际 TUN 配置。Git 的 HTTPS 地址可使用这些代理变量；`git@github.com:...` 的 SSH 地址不会自动使用 HTTP 代理。
 
 **Nix 下载由系统 `nix-daemon` 执行，不能只依靠终端里的 `export`。** 完成订阅导入、确认代理可用后，可在 `modules/mihomo.nix` 的模块属性集中添加以下声明，再执行 `sudo nixos-rebuild switch --flake .#minipc`：
 
@@ -278,9 +290,44 @@ systemd.services.nix-daemon.environment = {
 
 该设置也用于 Nix 固定输出下载（例如 Codex 发布文件）。首次安装代理工具本身仍需要直连或已经可用的代理；若现有重建仍卡在 Codex 下载，可以先把 `modules/development.nix` 中追加 Codex 包的部分暂时去掉，应用代理配置，再恢复 Codex 包并重建。不要重跑 Disko 或 nixos-anywhere。代理不可用时先移除上述 daemon 环境配置并重建；普通终端可用 `unset http_proxy https_proxy no_proxy` 恢复。
 
+## 10. Dokploy：部署本机应用
+
+DDNS-Go 已验证，域名为 `yback.v6.rocks`。Dokploy 管理 Docker 应用、数据库和部署；NixOS 的网络、SSH、DDNS 和 Mihomo 仍由本仓库管理。
+
+`modules/dokploy.nix` 启用 Docker，开放 TCP 80/443 和 UDP 443。3000 不开放给物理网络：Docker 的 `DOCKER-USER` 规则拦截来自当前 Wi-Fi 接口 `wlp3s0` 的面板访问，首次初始化通过 SSH 隧道完成。若更换网络接口，应同步调整该规则。单机部署不需要对公网开放 Swarm 的 2377、7946 和 4789 端口。
+
+在 **Mini PC 本机终端**执行（sudo 需要本地用户密码）：
+
+```bash
+cd ~/nixos-config
+git add modules/dokploy.nix scripts/dokploy-install.sh
+nix flake check
+sudo nixos-rebuild switch --flake .#minipc
+sudo docker info
+sudo env ADVERTISE_ADDR=192.168.2.106 bash scripts/dokploy-install.sh
+sudo docker service ls
+sudo docker ps
+```
+
+`192.168.2.106` 是安装准备时本机的 Wi-Fi 地址；执行前用 `ip -br addr` 核实，并在路由器设置 DHCP 地址保留。Swarm 通告地址使用实际局域网地址，不使用 DDNS 域名或代理出口地址。
+
+安装脚本基于已审阅的 [Dokploy 官方安装脚本](https://dokploy.com/install.sh)，由 NixOS 提供 Docker，不运行其他发行版的 Docker 安装器；已有 Swarm 时拒绝安装，不强制退出 Swarm，不删除现有网络。此脚本是一次性安装入口，不要配置为开机任务。它检测最新稳定 Dokploy 镜像版本，数据库及认证秘密保存为 Docker Secrets。若中途失败，先查看 `sudo docker service ls` 和 `sudo docker service logs --tail 50 dokploy`，不要重新安装或清除数据。
+
+在 **Mac** 建立隧道：
+
+```bash
+ssh -N -L 3000:127.0.0.1:3000 yulinye@yback.v6.rocks
+```
+
+浏览器打开 `http://localhost:3000`，创建管理员。然后在 Settings → Server 的 Web Server 设置中，将 Host 设为 `yback.v6.rocks`，启用 HTTPS 并选择 Let's Encrypt，填写自己的证书联系邮箱。配置方法见 [Dokploy 官方说明](https://docs.dokploy.com/docs/core/guides/cloudflare-tunnels)中的 Web Server 设置和 [Settings API](https://docs.dokploy.com/docs/api/settings)。
+
+HTTPS 前必须确认域名对应的公网地址可以从外网访问本机 80/443：IPv4 NAT 需要路由器端口转发，IPv6 需要路由器入站防火墙放行；DDNS 成功只说明 DNS 更新正常。若仅有 AAAA 记录，访问端也需要 IPv6。初始化后从 Mac 打开 `https://yback.v6.rocks` 验证证书和登录；无需转发 3000。
+
+数据位于 `/etc/dokploy` 及 `/var/lib/docker`（数据库、Docker volumes 和 Swarm 状态），不会进入 Git，也不会因 NixOS generation 回滚而回滚。应用上线前为 Dokploy 数据库和应用卷配置备份。日常通过面板管理应用，Docker 和系统配置变更通过 NixOS 重建。
+
 ## 配置边界与资料
 
-第一阶段未启用 Docker、Dokploy 或 Tailscale，也没有安装项目级编译器和语言运行时。`/persist` 只是普通 Btrfs 子卷，不启用 impermanence。
+已加入 Docker 配置和 Dokploy 安装流程；尚未启用 Tailscale，也没有安装项目级编译器和语言运行时。`/persist` 只是普通 Btrfs 子卷，不启用 impermanence。
 
 - [NixOS 26.05 官方手册](https://nixos.org/manual/nixos/stable/)
 - [Disko 官方 Btrfs 子卷示例](https://github.com/nix-community/disko/blob/master/example/btrfs-subvolumes.nix)

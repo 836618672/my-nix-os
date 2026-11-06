@@ -19,6 +19,9 @@ let
       store-selected: true
     tun:
       enable: true
+      device: Meta
+      auto-route: true
+      auto-detect-interface: true
     dns:
       enable: false
   '';

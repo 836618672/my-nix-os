@@ -9,27 +9,27 @@
 }:
 stdenvNoCC.mkDerivation (finalAttrs: {
   pname = "codex";
-  version = "0.159.2";
+  version = "0.163.0";
 
   src = fetchurl {
-    url = "https://github.com/openai/codex/releases/download/rust-v${finalAttrs.version}/codex-x86_64-unknown-linux-musl.tar.gz";
-    hash = "sha256-JlhrDSRtQaeZsO+O4a3TcPD7ByGzcJNA8o22EjgWFuo=";
+    url = "https://github.com/openai/codex/releases/download/rust-v${finalAttrs.version}/codex-package-x86_64-unknown-linux-musl.tar.gz";
+    hash = "sha256-WCZGxr8FYesN5UD3/IW5EhsAkagmvG6Wgwt/FyISIYI=";
   };
 
   dontUnpack = true;
+  dontStrip = true;
+  dontPatchELF = true;
   nativeBuildInputs = [ gnutar makeWrapper ];
 
   installPhase = ''
     runHook preInstall
-    mkdir -p "$out/bin"
-    tar -xzf "$src" -C "$out/bin"
-    mv "$out/bin/codex-x86_64-unknown-linux-musl" "$out/bin/codex"
-    chmod 755 "$out/bin/codex"
+    mkdir -p "$out/bin" "$out/libexec/codex"
+    # Keep the manifest, resources, and executable paths together. The daemon
+    # discovers the complete package relative to the actual executable.
+    tar -xzf "$src" -C "$out/libexec/codex"
+    makeWrapper "$out/libexec/codex/bin/codex" "$out/bin/codex" \
+      --prefix PATH : ${lib.makeBinPath [ bubblewrap ripgrep ]}
     runHook postInstall
-  '';
-
-  postFixup = ''
-    wrapProgram "$out/bin/codex" --prefix PATH : ${lib.makeBinPath [ bubblewrap ripgrep ]}
   '';
 
   meta = {

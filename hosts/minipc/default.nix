@@ -8,6 +8,7 @@
     ../../modules/development.nix
     ../../modules/ddns-go.nix
     ../../modules/mihomo.nix
+    ../../modules/dokploy.nix
   ] ++ lib.optional (builtins.pathExists ./hardware-configuration.nix)
     ./hardware-configuration.nix;
 
